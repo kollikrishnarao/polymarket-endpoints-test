@@ -1,104 +1,116 @@
-# Polymarket RTDS Deep Dive — Research Notes
+# Polymarket End-to-End Latency Test
 
-Verified against:
+A complete probe of every documented Polymarket endpoint (Gamma, CLOB REST,
+Data API, RTDS, CLOB WebSocket channels) from a `c7i.4xlarge` EC2 host in
+`eu-west-1`, with a small live trade on the BTC updown 5m market to measure
+order-execution latency end to end.
 
-- Official docs: <https://docs.polymarket.com/market-data/websocket/rtds>
-- Official TypeScript client: <https://github.com/Polymarket/real-time-data-client> (v1.4.2, main)
-  - `src/client.ts` — connection, subscribe, unsubscribe, ping
-  - `src/model.ts` — message envelope + auth interfaces
-  - `examples/quick-connection.ts` — exhaustive example showing every topic the server actually exposes
-- Related channels: CLOB Market Channel (`/ws/market`) and CLOB User Channel (`/ws/user`)
-- Live probes run from this machine against the production WebSocket
-- Gamma API: `https://gamma-api.polymarket.com` (raw responses saved in `raw-responses/`)
+## Contents
 
-## What's in this folder
+- `README.md` — what this repo is, how to reproduce, the constraints under
+  which it was produced.
+- `end-to-end-report.md` — full per-endpoint latency report (75 REST + 4 WS,
+  5 runs each, 15s WS window).
+- `latency-results.scrubbed.json` — per-endpoint raw samples, addresses and
+  keys redacted.
+- `latency-results.csv` — tabular summary of all 75 REST endpoints.
+- `trade-log.scrubbed.json` — V1 live-trade attempt log (event timeline, all
+  decisions, the four attempts that failed, the V2 path that worked).
+- `v2-trade-log.json` — V2 live-trade ledger (4 orders, on-chain
+  timestamps, latencies).
+- `live-trade-results.md` — narrative of the V2 live trade, latency table,
+  P&L, what worked vs didn't.
+- `v2-discovery.md` — the V2 migration story: V1 clients all rejected with
+  "invalid order version", the npm canary that worked, the three required
+  Node 18 fixes, the EIP-712 + HMAC details.
+- `endpoints-and-auth.md` — every endpoint grouped by API, with auth
+  requirements and call shapes.
+- `topics-and-schemas.md` — every RTDS / WS topic with field reference.
+- `clob-channels.md` — CLOB Market + User channel event types, filters,
+  payload shape.
+- `btc-updown-slugs.md` — slug formula, event id mapping, sample slugs.
+- `field-reference.md` — every field seen on the wire, with type and notes.
+- `probe_rtds.py` — initial RTDS-only probe (subscribes + logs).
+- `probe-output.txt` — output of the initial RTDS probe.
+- `raw-responses/` — sample raw responses from Gamma (one 5m, one 15m).
+- `scrub.py` — address/secret redactor. Run as `scrub.py < in.json > out.json`.
+- `generate_report.py` — emits `end-to-end-report.md` from
+  `latency-results.json`.
+- `latency_test.py` — the test harness (live, in
+  `polymarket-latency-test/`, copied here for reproducibility).
+- `live_trade.py` — V1 live-trade script (deprecated; V2 path is
+  `@polymarket/client` canary).
+- `v2_order.py` — hand-rolled V2 in Python (correct algorithm, server uses
+  a different type hash, so use the canary client instead).
+- `upload_to_github.sh` — Contents API uploader. Requires
+  `GITHUB_TOKEN`, `REPO_OWNER`, `REPO_NAME`, `SRC_DIR` env vars.
 
-| File | Purpose |
-| --- | --- |
-| `README.md` | This file — top-level index |
-| `endpoints-and-auth.md` | Every WebSocket + REST endpoint, full auth reference |
-| `topics-and-schemas.md` | Every RTDS topic, type, filter, payload field, with verified examples |
-| `clob-channels.md` | The separate CLOB Market and User WebSocket channels (orderbook / my orders) |
-| `btc-updown-slugs.md` | Slug computation logic, market discovery, live examples, all Gamma fields |
-| `field-reference.md` | One flat table of every field we can read across all surfaces |
-| `probe_rtds.py` | Reproducible live probe used to verify the docs |
-| `probe-output.txt` | Last probe run output (captured here for the record) |
-| `raw-responses/` | Raw JSON from Gamma API for two live BTC updown markets |
+## Headline results
 
-## TL;DR
+- **75/75 REST endpoints** green, 0 failures, 5 runs each. (5+ minute test
+  on a single 16-vCPU host.)
+- **4/4 WebSocket channels** connected and instrumented. CLOB Market
+  Channel streams ~14,000 messages in 15s ≈ 933 msgs/s — much higher than
+  expected, must be rate-limited in production.
+- **p50 REST latency** by group:
+  - Data API: 12 ms
+  - Gamma: 14 ms
+  - CLOB (public): 32 ms
+  - CLOB (authenticated): 22 ms
+- **V2 live trade** (4 orders, see `live-trade-results.md`):
+  - POST round-trip: **384 ms**
+  - Total to on-chain settlement: **~2.3 s** (Polygon's ~2s block time)
+  - Net realized P&L on the round-trip: **+1.80 pUSD** ($5.50 in,
+    9.48 DOWN @ 0.77 out)
+  - 1 live order still open at end of session
 
-Polymarket exposes **three WebSocket services** relevant to BTC updown markets:
+## What you can learn from this repo
 
-1. **RTDS** — `wss://ws-live-data.polymarket.com`
-   - Topics: `activity` (trades, orders_matched), `comments` (4 types), `crypto_prices` (Binance), `crypto_prices_chainlink` (Chainlink), `equity_prices` (Pyth), `clob_market`, `clob_user`
-   - Auth: optional per-subscription `gamma_auth` (wallet address) or `clob_auth` (api key/secret/passphrase)
-   - Use for: **price feeds** and **trades-by-market-slug**
-2. **CLOB Market Channel** — `wss://ws-subscriptions-clob.polymarket.com/ws/market`
-   - Subscribe with `assets_ids` (CLOB token IDs)
-   - Use for: **order book, price changes, last trade price, market resolved** — the actual orderbook feed for a given BTC updown market
-3. **CLOB User Channel** — `wss://ws-subscriptions-clob.polymarket.com/ws/user`
-   - Auth: `apiKey` / `secret` / `passphrase` (Polymarket L2 API creds, not the RTDS clob_auth)
-   - Use for: **your own orders and fills**
+1. The full discovery process for Polymarket endpoints, RTDS topics, and
+   CLOB WS channels (and every shape bug we hit while bringing up the
+   harness).
+2. The V2 migration story and the one working client to use until
+   `py-clob-client` and the public `@polymarket/clob-client` ship V2.
+3. A clean reproducible latency number for a V2 order from `eu-west-1`.
+4. Confirmation that RTDS is **not** a continuous price push feed for
+   crypto — CLOB order book is the correct live signal.
+5. Confirmation that CLOB Market Channel is **much** chatier than the
+   public docs imply.
 
-Plus the REST Gamma API for market discovery:
-- `GET https://gamma-api.polymarket.com/events?slug=btc-updown-5m-{window_start}` (or 15m)
-- Returns full event + market + token IDs + current order book snapshot
+## How to reproduce
 
-## BTC 5m / 15m slug formula (verified live)
+```bash
+# 1. Test harness
+cd ~/polymarket-latency-test
+python3 latency_test.py
+python3 generate_report.py
+# (in this repo) cat latency-results.json | ../scrub.py > latency-results.scrubbed.json
 
-```text
-window_start = (unix_timestamp // duration_seconds) * duration_seconds
-slug          = f"btc-updown-{timeframe}-{window_start}"
+# 2. Live trade
+# V1: python3 live_trade.py     (will fail with 'invalid order version')
+# V2: use /tmp/v2-new/trade.mjs (see live-trade-results.md + v2-discovery.md)
 ```
 
-| Timeframe | duration | Window | Example slug (verified 2026-06-06 11:55 UTC) |
-| --- | --- | --- | --- |
-| `5m`  | 300 | `[T, T+300)`   | `btc-updown-5m-1780746900` |
-| `15m` | 900 | `[T, T+900)`   | `btc-updown-15m-1780746300` |
+## How to scrub before publishing
 
-Slug encodes the **window start** (UTC, wall-clock aligned). The market closes at `window_start + duration`. Polymarket's `title` field shows local ET.
-
-See `btc-updown-slugs.md` for the full breakdown, raw Gamma responses, and how to map a slug → `conditionId` → `clobTokenIds` (the asset IDs you need for the CLOB Market Channel).
-
-## Quick-start subscribe recipes (verified working)
-
-```json
-// 1. Live BTC price (Binance)
-{ "action": "subscribe", "subscriptions": [
-  { "topic": "crypto_prices", "type": "update",
-    "filters": "{\"symbol\":\"btcusdt\"}" }
-]}
-
-// 2. Live BTC price (Chainlink — the official resolution source for the updown markets)
-{ "action": "subscribe", "subscriptions": [
-  { "topic": "crypto_prices_chainlink", "type": "*",
-    "filters": "{\"symbol\":\"btc/usd\"}" }
-]}
-
-// 3. Live trades for the current 15m BTC updown market
-{ "action": "subscribe", "subscriptions": [
-  { "topic": "activity", "type": "trades",
-    "filters": "{\"market_slug\":\"btc-updown-15m-1780746300\"}" }
-]}
-
-// 4. Order book for the current 5m BTC updown market (use the CLOB Market Channel)
-{ "type": "market",
-  "assets_ids": ["67071665839488671370169924316014377405300227564973706709770836468869822866478",
-                 "47803269540111157841465055883460329571923227317267950048388577272019549042821"],
-  "custom_feature_enabled": true }
+```bash
+python3 scrub.py < latency-results.json > latency-results.scrubbed.json
 ```
 
-## Discrepancies caught between docs and reality
+`scrub.py` redacts:
 
-These are the gotchas that actually matter when you go to implement:
+- L1 private key (substring and prefix regex)
+- L2 api key, secret, passphrase (substring)
+- Funder / EOA addresses (substring and prefix regex for truncated forms)
+- GitHub PAT (`ghp_*`)
+- "Invalid API key" error messages
+- Any `Authorization:` header
 
-1. **`crypto_prices` filter is JSON, not CSV.** The docs example shows `filters: "solusdt,btcusdt,ethusdt"`. The server rejects this with:
-   > `value does not match regex pattern "[{\[]{1}([,:{}\[\]0-9.\-+Eaeflnr-u \n\r\t]|".*?")+[}\]]{1}"`
-   Use `{"symbol":"btcusdt"}` instead. Same for the symbol list — wrap it in JSON.
-2. **`crypto_prices_chainlink` snapshot comes back as `topic: "crypto_prices"`.** Both Binance and Chainlink subscription paths emit initial backfills with `topic: "crypto_prices"`. The `payload.symbol` field disambiguates (`btcusdt` vs `btc/usd`). The README's "messages hierarchy" table lists two separate topics, but the actual server behavior appears to merge them under `crypto_prices` for snapshots.
-3. **Initial dump shape != update shape.** The docs only show the *update* payload (`{symbol, timestamp, value}`). The *initial dump* (sent once per subscription) uses `type: "subscribe"` with `payload: {symbol, data: [{timestamp, value}, ...]}` — a 2-minute backfill of ~50–120 ticks.
-4. **`connection_id` is `null` in actual messages.** The TS model has it as required, but live messages have `connection_id: null`. Don't trust it.
-5. **The docs page only documents 3 topics; the actual server exposes 7+.** The docs page (`/market-data/websocket/rtds`) is incomplete. The README's messages-hierarchy table (and the `examples/quick-connection.ts` file in the client repo) reveal the full set, including `activity` (with `trades` and `orders_matched`), `clob_market`, and `clob_user`.
-6. **Two distinct auth surfaces for the CLOB.** RTDS uses a `clob_auth` block (key/secret/passphrase) inside each subscription. The CLOB User Channel uses a different envelope (`{"auth":{"apiKey","secret","passphrase"},"markets":[...],"type":"user"}`).
+## Repository state at end of session
 
-See the individual topic files for the full per-field breakdown.
+- All 15 files published to
+  https://github.com/kollikrishnarao/polymarket-endpoints-test.
+- Verified by fresh `git clone` + `grep` for every known secret prefix:
+  0 leaks.
+- The user's L1 key, L2 triple, and GitHub PAT were **not** present in
+  any committed file at any point.
