@@ -1,0 +1,94 @@
+{
+  "session": "2026-06-06 14:38-14:50 UTC",
+  "server": "c7i.4xlarge EC2, eu-west-1",
+  "client": "@polymarket/client@0.0.0-canary-20260520141050",
+  "market": {
+    "slug": "btc-updown-5m-1780756800",
+    "title": "Bitcoin Up or Down - June 6, 10:40AM-10:45AM ET",
+    "condition_id": "0x50ed161538e8e144e7a9841c1d1235e3a18fed072fb19f59d90651e001251c1b",
+    "end_date": "2026-06-06T14:45:00Z",
+    "fee_bps": 1000,
+    "tick_size": 0.01
+  },
+  "setup_steps": [
+    "1. Discovered V1 clients were rejected by server with 'invalid order version'",
+    "2. Verified Polymarket deployed CTF V2 + pUSD on 2026-04-06",
+    "3. Found npm canary @polymarket/client@0.0.0-canary-20260520141050 (published 2026-05-20)",
+    "4. Installed in /tmp/v2-new, set globalThis.crypto = webcrypto for Node 18",
+    "5. Used createSecureClient({signer, wallet, credentials, environment: production})",
+    "6. Verified pUSD balance: 6.00, allowance to V2 exchange already maxed"
+  ],
+  "trades": [
+    {
+      "n": 1,
+      "ts_post": "unknown",
+      "ts_response": "~14:42:35",
+      "ts_onchain": "14:41:51",
+      "block": 88034617,
+      "side": "BUY",
+      "token": "DOWN",
+      "token_id_suffix": "...",
+      "amount_pUSD": 5.5,
+      "shares_filled": 9.482757,
+      "effective_price": 0.58,
+      "order_id": "0x0a2ea0e0e14b07cec2bcdab718af84c128f45ff5ab91099a14938220668dd2f9",
+      "tx_hash": "0x1ad3a16e556adb8a3c73aa0f18a5dd602835273aa49ad23da35d03aadd62b0e1",
+      "status": "matched"
+    },
+    {
+      "n": 2,
+      "ts_post": "14:42:39",
+      "ts_response": "14:42:39",
+      "ts_onchain": "never filled",
+      "side": "SELL",
+      "token": "DOWN",
+      "amount_pUSD": 9.29,
+      "shares": 9.38,
+      "limit_price": 0.99,
+      "order_id": "0xd17a41dd416006971a7cae0aeef137f2558e23ff533c46bbc4be29a1c43ac845",
+      "status": "live (resting on book, cancelled by user before fill)"
+    },
+    {
+      "n": 3,
+      "ts_post": "n/a (manual via web UI)",
+      "ts_onchain": "14:43:24",
+      "block": 88034679,
+      "side": "SELL",
+      "token": "DOWN",
+      "shares": 9.48,
+      "price": 0.77,
+      "tx_hash": "0x1c9c28ed837db0e17106091658266c8b5b3fc2675ea862cf593086cea0c19987",
+      "status": "matched",
+      "note": "User manually sold through Polymarket web UI; bypassed the GTC at 0.99"
+    },
+    {
+      "n": 4,
+      "ts_post": "14:48:39.748",
+      "ts_response": "14:48:40.132",
+      "ts_onchain": "14:48:42",
+      "block": 88034891,
+      "side": "BUY",
+      "token": "DOWN",
+      "amount_pUSD": 1.0,
+      "shares_filled": 1.449274,
+      "effective_price": 0.69,
+      "order_id": "0x73370749896f45103e5d31404223efa179b34c3dfc438d2965bc79ee2405c473",
+      "tx_hash": "0x817921c51a8eb44501b7c8ce0a1ac788b5cdf13e6d5f9c288025847035d029dd",
+      "status": "matched",
+      "post_roundtrip_ms": 384,
+      "total_to_onchain_ms": 2252
+    }
+  ],
+  "pnl": {
+    "trade_1_buy_5.5": -5.5,
+    "trade_3_sell_9.48_at_0.77": 7.2996,
+    "trade_4_buy_1.0_open": -0.999999,
+    "realized": 1.7996,
+    "currency": "pUSD"
+  },
+  "latency_summary": {
+    "v2_post_roundtrip_ms": 384,
+    "v2_post_to_onchain_ms": 2252,
+    "polygon_block_time_s": 2
+  }
+}
