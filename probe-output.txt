@@ -1,0 +1,56 @@
+STATE: closed code=None reason=None
+SUBS_SENT: [
+  {
+    "action": "subscribe",
+    "subscriptions": [
+      {
+        "topic": "crypto_prices",
+        "type": "update",
+        "filters": "{\"symbol\": \"btcusdt\"}"
+      },
+      {
+        "topic": "crypto_prices_chainlink",
+        "type": "*",
+        "filters": "{\"symbol\": \"btc/usd\"}"
+      },
+      {
+        "topic": "activity",
+        "type": "trades",
+        "filters": "{\"market_slug\": \"btc-updown-15m-1780746300\"}"
+      }
+    ]
+  }
+]
+ERRORS: []
+MSG_COUNT: 3
+
+========= msg 0 =========
+raw frame: ''
+========= msg 1 =========
+{
+  "topic": "crypto_prices",
+  "type": "subscribe",
+  "timestamp": 1780746942953,
+  "connection_id": null,
+  "payload": {
+    "data": "<120 items>",
+    "symbol": "btcusdt"
+  }
+}
+  data first 3: [{'timestamp': 1780746823000, 'value': 60906}, {'timestamp': 1780746824000, 'value': 60906}, {'timestamp': 1780746825000, 'value': 60906}]
+  data last 3:  [{'timestamp': 1780746940000, 'value': 60907.99}, {'timestamp': 1780746941000, 'value': 60908}, {'timestamp': 1780746942000, 'value': 60908}]
+  data total:   120
+========= msg 2 =========
+{
+  "topic": "crypto_prices",
+  "type": "subscribe",
+  "timestamp": 1780746942954,
+  "connection_id": null,
+  "payload": {
+    "data": "<57 items>",
+    "symbol": "btc/usd"
+  }
+}
+  data first 3: [{'timestamp': 1780746883000, 'value': 60870.70685776276}, {'timestamp': 1780746884000, 'value': 60870.69983724754}, {'timestamp': 1780746885000, 'value': 60870.694675448765}]
+  data last 3:  [{'timestamp': 1780746938000, 'value': 60874.951860935886}, {'timestamp': 1780746939000, 'value': 60875.11801093589}, {'timestamp': 1780746940000, 'value': 60875.03363265902}]
+  data total:   57
